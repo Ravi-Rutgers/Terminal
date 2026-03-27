@@ -1,4 +1,4 @@
-import React, { useState, useCallback, useRef, useEffect } from 'react';
+import React, { useState, useCallback, useRef } from 'react';
 import {
   View,
   Text,
@@ -12,7 +12,6 @@ import {
   Animated,
   PanResponder,
   Dimensions,
-  Easing,
 } from 'react-native';
 import { showAlert } from '../../utils/alert';
 import { Ionicons } from '@expo/vector-icons';
@@ -22,7 +21,6 @@ import { getItem, setItem, deleteItem } from '../../utils/storage';
 import { useRouter } from 'expo-router';
 import { useStore } from '../../store';
 import { useApi } from '../../hooks/useApi';
-import { useWebSocket } from '../../hooks/useWebSocket';
 import { useGitHub, GITHUB_TOKEN_KEY, GITHUB_API } from '../../hooks/useGitHub';
 
 // Language color map
@@ -238,10 +236,9 @@ function snapTo(value: number): number {
 }
 
 export default function GitHubScreen() {
-  const { serverUrl, githubToken, setGithubToken, accentColor, addSession, setActiveSessionId, editorProjectPath } = useStore();
+  const { serverUrl, githubToken, setGithubToken, accentColor, addSession, setActiveSessionId } = useStore();
   const { apiFetch } = useApi();
-  const { ghFetch, ghFetchRaw, ghFetchPages, ghPost, ghPatch, ghPut, ghDelete } = useGitHub();
-  const { sendInput } = useWebSocket();
+  const { ghFetch, ghFetchRaw, ghFetchPages, ghPost, ghPatch, ghDelete } = useGitHub();
   const router = useRouter();
   const [search, setSearch] = useState('');
   const [selectedRepo, setSelectedRepo] = useState<Repo | null>(null);
@@ -272,8 +269,6 @@ export default function GitHubScreen() {
   const [newPRHead, setNewPRHead] = useState('');
   const [newPRBase, setNewPRBase] = useState('');
   const [mergeMethod, setMergeMethod] = useState<'merge' | 'squash' | 'rebase'>('merge');
-  const [gitActionLoading, setGitActionLoading] = useState<'clone' | 'pull' | 'push' | null>(null);
-  const gitActionAnim = useRef(new Animated.Value(0)).current;
 
   // Panel slide — fixed height, animate translateY to extend/collapse
   // translateY = 0 means fully open (MODAL_MAX_HEIGHT visible)
@@ -390,7 +385,7 @@ export default function GitHubScreen() {
   });
 
   // Fetch PR comments (uses issues endpoint)
-  const { data: prComments = [], isLoading: loadingPRComments, refetch: refetchPRComments } = useQuery<IssueComment[]>({
+  const { data: prComments = [], isLoading: loadingPRComments } = useQuery<IssueComment[]>({
     queryKey: ['github-pr-comments', selectedRepo?.full_name, viewingPR],
     queryFn: () => ghFetch(`/repos/${selectedRepo!.full_name}/issues/${viewingPR}/comments?per_page=50`),
     enabled: !!selectedRepo && !!viewingPR,
@@ -525,18 +520,7 @@ export default function GitHubScreen() {
     await deleteItem(GITHUB_TOKEN_KEY);
   };
 
-  const playGitAnimation = () => {
-    gitActionAnim.setValue(0);
-    Animated.sequence([
-      Animated.timing(gitActionAnim, { toValue: 1, duration: 300, easing: Easing.out(Easing.back(1.5)), useNativeDriver: true }),
-      Animated.timing(gitActionAnim, { toValue: 0, duration: 200, easing: Easing.in(Easing.ease), useNativeDriver: true }),
-    ]).start();
-  };
-
-  const runInTerminal = async (command: string, action?: 'clone' | 'pull' | 'push') => {
-    if (gitActionLoading) return;
-    setGitActionLoading(action || null);
-    playGitAnimation();
+  const runInTerminal = async (command: string) => {
     try {
       const session = await apiFetch('/api/sessions', {
         method: 'POST',
@@ -544,20 +528,14 @@ export default function GitHubScreen() {
       });
       addSession(session);
       setActiveSessionId(session.id);
-      // Small delay to let WebSocket connect before sending input
-      setTimeout(() => {
-        sendInput(session.id, command + '\r');
-      }, 500);
       setSelectedRepo(null);
       router.push('/(tabs)/terminal');
     } catch (err: any) {
       showAlert('Fout', err.message);
-    } finally {
-      setGitActionLoading(null);
     }
   };
 
-  const cloneToTerminal = (repo: Repo) => runInTerminal(`git clone "${repo.clone_url}"`, 'clone');
+  const cloneToTerminal = (repo: Repo) => runInTerminal(`git clone ${repo.clone_url}`);
 
   const createBranch = async () => {
     if (!selectedRepo || !newBranchName.trim() || !newBranchBase) return;
@@ -641,18 +619,16 @@ export default function GitHubScreen() {
     if (!selectedRepo || !viewingPR) return;
     setSubmitting(true);
     try {
-      await ghPut(`/repos/${selectedRepo.full_name}/pulls/${viewingPR}/merge`, { merge_method: mergeMethod });
+      await ghFetch(`/repos/${selectedRepo.full_name}/pulls/${viewingPR}/merge`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ merge_method: mergeMethod }),
+      });
       showAlert('Gelukt', 'Pull request is gemerged');
       refetchPRs();
       setViewingPR(null);
     } catch (err: any) {
-      if (err.message?.includes('405') || err.message?.includes('409') || err.message?.toLowerCase().includes('conflict')) {
-        showAlert('Merge conflict', 'Er zijn conflicten die eerst opgelost moeten worden voordat deze PR gemerged kan worden.');
-      } else if (err.message?.includes('not mergeable')) {
-        showAlert('Niet mergeable', 'Deze pull request kan momenteel niet gemerged worden. Controleer de checks en reviews.');
-      } else {
-        showAlert('Fout', err.message);
-      }
+      showAlert('Fout', err.message);
     } finally {
       setSubmitting(false);
     }
@@ -682,7 +658,6 @@ export default function GitHubScreen() {
         body: prCommentText.trim(),
       });
       setPrCommentText('');
-      refetchPRComments();
     } catch (err: any) {
       showAlert('Fout', err.message);
     } finally {
@@ -1931,60 +1906,30 @@ export default function GitHubScreen() {
                   )}
                 </ScrollView>
 
-                {/* Git action buttons with animation */}
-                <Animated.View style={[styles.gitActionRow, {
-                  transform: [{
-                    scale: gitActionAnim.interpolate({
-                      inputRange: [0, 1],
-                      outputRange: [1, 1.05],
-                    }),
-                  }],
-                }]}>
+                {/* Git action buttons */}
+                <View style={styles.gitActionRow}>
                   <TouchableOpacity
                     style={[styles.gitActionBtn, { backgroundColor: accentColor }]}
                     onPress={() => cloneToTerminal(selectedRepo)}
-                    disabled={!!gitActionLoading}
                   >
-                    {gitActionLoading === 'clone' ? (
-                      <ActivityIndicator size="small" color="#0a0a0a" style={{ marginRight: 4 }} />
-                    ) : (
-                      <Ionicons name="download-outline" size={16} color="#0a0a0a" style={{ marginRight: 4 }} />
-                    )}
+                    <Ionicons name="download-outline" size={16} color="#0a0a0a" style={{ marginRight: 4 }} />
                     <Text style={styles.cloneButtonText}>Clone</Text>
                   </TouchableOpacity>
                   <TouchableOpacity
                     style={[styles.gitActionBtn, { backgroundColor: '#1a1a1a', borderWidth: 1, borderColor: '#333' }]}
-                    onPress={() => {
-                      const dir = editorProjectPath;
-                      const cmd = dir ? `cd "${dir}" && git pull` : 'git pull';
-                      runInTerminal(cmd, 'pull');
-                    }}
-                    disabled={!!gitActionLoading}
+                    onPress={() => runInTerminal('git pull')}
                   >
-                    {gitActionLoading === 'pull' ? (
-                      <ActivityIndicator size="small" color="#e0e0e0" style={{ marginRight: 4 }} />
-                    ) : (
-                      <Ionicons name="arrow-down-outline" size={16} color="#e0e0e0" style={{ marginRight: 4 }} />
-                    )}
+                    <Ionicons name="arrow-down-outline" size={16} color="#e0e0e0" style={{ marginRight: 4 }} />
                     <Text style={[styles.cloneButtonText, { color: '#e0e0e0' }]}>Pull</Text>
                   </TouchableOpacity>
                   <TouchableOpacity
                     style={[styles.gitActionBtn, { backgroundColor: '#1a1a1a', borderWidth: 1, borderColor: '#333' }]}
-                    onPress={() => {
-                      const dir = editorProjectPath;
-                      const cmd = dir ? `cd "${dir}" && git push` : 'git push';
-                      runInTerminal(cmd, 'push');
-                    }}
-                    disabled={!!gitActionLoading}
+                    onPress={() => runInTerminal('git push')}
                   >
-                    {gitActionLoading === 'push' ? (
-                      <ActivityIndicator size="small" color="#e0e0e0" style={{ marginRight: 4 }} />
-                    ) : (
-                      <Ionicons name="arrow-up-outline" size={16} color="#e0e0e0" style={{ marginRight: 4 }} />
-                    )}
+                    <Ionicons name="arrow-up-outline" size={16} color="#e0e0e0" style={{ marginRight: 4 }} />
                     <Text style={[styles.cloneButtonText, { color: '#e0e0e0' }]}>Push</Text>
                   </TouchableOpacity>
-                </Animated.View>
+                </View>
         </Animated.View>
       )}
 
