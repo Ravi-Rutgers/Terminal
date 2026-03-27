@@ -28,7 +28,8 @@ interface MenuItem {
 const MENU_ITEMS: MenuItem[] = [
   { route: '/(tabs)/terminal', title: 'Terminal', icon: 'terminal', section: 'Hoofd' },
   { route: '/(tabs)/agents', title: 'Agents', icon: 'people', section: 'Hoofd' },
-  { route: '/(tabs)/source-control', title: 'Source Control', icon: 'git-compare-outline', section: 'Hoofd' },
+  { route: '/(tabs)/github', title: 'GitHub', icon: 'logo-github', section: 'Hoofd' },
+  { route: '/(tabs)/changes', title: 'Changes', icon: 'git-compare-outline', section: 'Hoofd' },
   { route: '/(tabs)/editor', title: 'Editor', icon: 'code-slash', section: 'Hoofd' },
   { route: '/(tabs)/logs', title: 'Logs', icon: 'document-text', section: 'Monitor' },
   { route: '/(tabs)/usage', title: 'Usage', icon: 'stats-chart', section: 'Monitor' },

@@ -857,8 +857,8 @@ const styles = StyleSheet.create({
     gap: 6,
   },
   statusDot: {
-    width: 9,
-    height: 9,
+    width: 8,
+    height: 8,
     borderRadius: 4,
   },
   divider: {
