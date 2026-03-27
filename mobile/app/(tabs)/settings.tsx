@@ -227,7 +227,7 @@ function SectionHeader({ icon, title, color: iconColor }: { icon: string; title:
 // --- Main screen ---
 
 export default function SettingsScreen() {
-  const { accentColor, setAccentColor, serverUrl, sessions, githubToken, setGithubToken, terminalFontSize, setTerminalFontSize, setSessions, setActiveSessionId, setShowSplash } = useStore();
+  const { accentColor, setAccentColor, serverUrl, sessions, githubToken, setGithubToken, terminalFontSize, setTerminalFontSize, setSessions, setActiveSessionId } = useStore();
   const { logout } = useAuth();
   const { apiFetch } = useApi();
 
@@ -783,14 +783,6 @@ export default function SettingsScreen() {
             <Text style={styles.infoValue}>Expo 54</Text>
           </View>
         </View>
-        <TouchableOpacity
-          style={styles.actionBtn}
-          onPress={() => setShowSplash(true)}
-          activeOpacity={0.7}
-        >
-          <Ionicons name="play-outline" size={16} color={colors.accent} />
-          <Text style={styles.actionBtnText}>Splash testen</Text>
-        </TouchableOpacity>
         <Text style={styles.copyright}>© 2026 Magmoet. Alle rechten voorbehouden.</Text>
       </View>
     </ScrollView>

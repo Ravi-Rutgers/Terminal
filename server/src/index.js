@@ -233,63 +233,6 @@ app.post('/api/files/rename', (req, res) => {
   res.json(result);
 });
 
-// --- Git endpoints ---
-const { execFile } = require('child_process');
-
-function runGit(args, cwd, res) {
-  execFile('git', args, { cwd, maxBuffer: 1024 * 1024 }, (err, stdout, stderr) => {
-    if (err) return res.status(500).json({ error: stderr || err.message });
-    res.json({ output: stdout });
-  });
-}
-
-app.get('/api/git/status', (req, res) => {
-  const dir = req.query.path;
-  if (!dir) return res.status(400).json({ error: 'path required' });
-  execFile('git', ['status', '--porcelain'], { cwd: dir, maxBuffer: 1024 * 1024 }, (err, stdout, stderr) => {
-    if (err) return res.status(500).json({ error: stderr || err.message });
-    res.json({ output: stdout });
-  });
-});
-
-app.get('/api/git/diff', (req, res) => {
-  const dir = req.query.path;
-  const file = req.query.file;
-  if (!dir) return res.status(400).json({ error: 'path required' });
-  const args = ['diff'];
-  if (file) args.push('--', file);
-  runGit(args, dir, res);
-});
-
-app.get('/api/git/diff-staged', (req, res) => {
-  const dir = req.query.path;
-  const file = req.query.file;
-  if (!dir) return res.status(400).json({ error: 'path required' });
-  const args = ['diff', '--cached'];
-  if (file) args.push('--', file);
-  runGit(args, dir, res);
-});
-
-app.get('/api/git/log', (req, res) => {
-  const dir = req.query.path;
-  const n = Math.min(parseInt(req.query.n) || 10, 100);
-  if (!dir) return res.status(400).json({ error: 'path required' });
-  runGit(['log', `--pretty=format:%H||%an||%ar||%s`, `-${n}`, '--stat'], dir, res);
-});
-
-app.get('/api/git/numstat', (req, res) => {
-  const dir = req.query.path;
-  if (!dir) return res.status(400).json({ error: 'path required' });
-  execFile('git', ['diff', '--numstat'], { cwd: dir, maxBuffer: 1024 * 1024 }, (err, stdout, stderr) => {
-    if (err) return res.status(500).json({ error: stderr || err.message });
-    // Also get staged changes
-    execFile('git', ['diff', '--cached', '--numstat'], { cwd: dir, maxBuffer: 1024 * 1024 }, (err2, stdoutStaged) => {
-      if (err2) return res.status(500).json({ error: err2.message });
-      res.json({ unstaged: stdout, staged: stdoutStaged || '' });
-    });
-  });
-});
-
 // --- Start server (HTTP for local dev, HTTPS for production) ---
 const http = require('http');
 const USE_HTTPS = process.env.USE_HTTPS === 'true';

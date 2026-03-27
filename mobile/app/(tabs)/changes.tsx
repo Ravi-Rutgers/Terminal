@@ -65,6 +65,15 @@ function parseLog(raw: string): CommitInfo | null {
   };
 }
 
+function statusLabel(s: string): string {
+  if (s === 'M' || s === 'MM') return 'Gewijzigd';
+  if (s === 'A' || s === 'AM') return 'Nieuw';
+  if (s === 'D') return 'Verwijderd';
+  if (s === '??') return 'Untracked';
+  if (s.startsWith('R')) return 'Hernoemd';
+  return s;
+}
+
 function statusColor(s: string): string {
   if (s === 'M' || s === 'MM') return colors.yellow;
   if (s === 'A' || s === 'AM') return colors.accent;
