@@ -234,6 +234,8 @@ app.post('/api/files/rename', (req, res) => {
 });
 
 // --- Git endpoints ---
+const { execFile } = require('child_process');
+
 function runGit(args, cwd, res) {
   execFile('git', args, { cwd, maxBuffer: 1024 * 1024 }, (err, stdout, stderr) => {
     if (err) return res.status(500).json({ error: stderr || err.message });
