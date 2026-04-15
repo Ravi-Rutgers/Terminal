@@ -269,6 +269,18 @@ app.post('/api/files/rename', (req, res) => {
   res.json(result);
 });
 
+app.get('/api/files/download', authMiddleware, (req, res) => {
+  if (!req.query.path) return res.status(400).json({ error: 'path required' });
+  const result = files.downloadFile(req.query.path);
+  if (result.error) return res.status(result.status || 400).json({ error: result.error });
+  res.set({
+    'Content-Type': result.mimeType,
+    'Content-Disposition': `attachment; filename="${encodeURIComponent(result.name)}"`,
+    'Content-Length': result.size,
+  });
+  res.send(result.buffer);
+});
+
 // --- Git endpoints ---
 function runGit(args, cwd, res) {
   execFile('git', args, { cwd, maxBuffer: 1024 * 1024 }, (err, stdout, stderr) => {
