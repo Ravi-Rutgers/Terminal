@@ -1,4 +1,4 @@
-import { Paths, File as FSFile } from 'expo-file-system';
+import * as FileSystem from 'expo-file-system/legacy';
 import * as MediaLibrary from 'expo-media-library';
 import * as Sharing from 'expo-sharing';
 
@@ -20,24 +20,28 @@ export async function downloadFile(
   fileName: string,
 ): Promise<{ ok: true; target: 'camera' | 'share' } | { ok: false; error: string }> {
   const url = `${serverUrl}/api/files/download?path=${encodeURIComponent(filePath)}`;
-  const cacheDir = Paths.cache;
+  const localUri = (FileSystem.cacheDirectory ?? '') + fileName;
 
-  let downloadedFile: any;
+  let downloadResult: FileSystem.FileSystemDownloadResult;
   try {
-    // FSFile.downloadFileAsync is a static method that downloads and returns the File object
-    downloadedFile = await FSFile.downloadFileAsync(url, cacheDir, {
+    downloadResult = await FileSystem.downloadAsync(url, localUri, {
       headers: { Authorization: `Bearer ${token}` },
-      idempotent: true,
     });
   } catch (e: any) {
-    const errMsg = e.message || 'Netwerkfout';
-    if (errMsg.includes('413')) {
-      return { ok: false, error: 'Bestand te groot (>50MB)' };
-    }
-    if (errMsg.includes('404')) {
-      return { ok: false, error: 'Bestand niet gevonden' };
-    }
-    return { ok: false, error: errMsg };
+    return { ok: false, error: e.message || 'Netwerkfout' };
+  }
+
+  if (downloadResult.status === 413) {
+    await FileSystem.deleteAsync(localUri, { idempotent: true });
+    return { ok: false, error: 'Bestand te groot (>50MB)' };
+  }
+  if (downloadResult.status === 404) {
+    await FileSystem.deleteAsync(localUri, { idempotent: true });
+    return { ok: false, error: 'Bestand niet gevonden' };
+  }
+  if (downloadResult.status !== 200) {
+    await FileSystem.deleteAsync(localUri, { idempotent: true });
+    return { ok: false, error: `Serverfout (${downloadResult.status})` };
   }
 
   const ext = getExtension(fileName);
@@ -47,8 +51,8 @@ export async function downloadFile(
     const { status } = await MediaLibrary.requestPermissionsAsync();
     if (status === 'granted') {
       try {
-        await MediaLibrary.saveToLibraryAsync(downloadedFile.uri);
-        await downloadedFile.delete();
+        await MediaLibrary.saveToLibraryAsync(localUri);
+        await FileSystem.deleteAsync(localUri, { idempotent: true });
         return { ok: true, target: 'camera' };
       } catch (e: any) {
         // fallthrough to share sheet
@@ -59,10 +63,10 @@ export async function downloadFile(
   // Share sheet (also fallback when MediaLibrary permission denied)
   const canShare = await Sharing.isAvailableAsync();
   if (!canShare) {
-    await downloadedFile.delete();
+    await FileSystem.deleteAsync(localUri, { idempotent: true });
     return { ok: false, error: 'Delen niet beschikbaar op dit apparaat' };
   }
-  await Sharing.shareAsync(downloadedFile.uri, { UTI: 'public.item' });
-  await downloadedFile.delete();
+  await Sharing.shareAsync(localUri, { UTI: 'public.item' });
+  await FileSystem.deleteAsync(localUri, { idempotent: true });
   return { ok: true, target: 'share' };
 }
