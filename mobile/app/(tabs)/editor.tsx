@@ -12,6 +12,7 @@ import {
   Keyboard,
 } from 'react-native';
 import { showAlert } from '../../utils/alert';
+import { downloadFile } from '../../utils/downloadFile';
 import { Ionicons } from '@expo/vector-icons';
 import FileTree, { FileItem } from '../../components/FileTree';
 import CodeEditor, { CodeEditorRef } from '../../components/CodeEditor';
@@ -30,6 +31,8 @@ export default function EditorTab() {
   const { apiFetch } = useApi();
   const {
     accentColor,
+    serverUrl,
+    token,
     editorProjectPath: storedProjectPath,
     editorCurrentDir: storedCurrentDir,
     editorOpenFile: storedOpenFile,
@@ -75,6 +78,9 @@ export default function EditorTab() {
 
   // Context menu (3 dots)
   const [contextItem, setContextItem] = useState<FileItem | null>(null);
+
+  // Download state
+  const [downloadingPath, setDownloadingPath] = useState<string | null>(null);
 
   // Rename dialog
   const [showRename, setShowRename] = useState(false);
@@ -279,6 +285,22 @@ export default function EditorTab() {
     ]);
   };
 
+  const handleDownload = async (item: FileItem) => {
+    if (!serverUrl || !token) return;
+    setDownloadingPath(item.path);
+    try {
+      const result = await downloadFile(serverUrl, token, item.path, item.name);
+      if (!result.ok) {
+        showAlert('Fout', result.error);
+      } else if (result.target === 'camera') {
+        showAlert('Opgeslagen', 'Bestand opgeslagen in Camera Roll');
+      }
+      // share sheet: geen alert nodig, share sheet is de bevestiging
+    } finally {
+      setDownloadingPath(null);
+    }
+  };
+
   const browseUp = () => {
     const parent = browsePath.replace(/[\\/][^\\/]+$/, '');
     if (parent && parent !== browsePath) loadBrowse(parent);
@@ -464,6 +486,23 @@ export default function EditorTab() {
         <TouchableOpacity style={styles.modalBackdrop} activeOpacity={1} onPress={() => setContextItem(null)}>
           <View style={styles.dialog} onStartShouldSetResponder={() => true}>
             <Text style={styles.dialogTitle} numberOfLines={1}>{contextItem?.name}</Text>
+            {!contextItem?.isDirectory && (
+              <TouchableOpacity
+                style={styles.contextOption}
+                onPress={() => {
+                  const item = contextItem!;
+                  setContextItem(null);
+                  handleDownload(item);
+                }}
+              >
+                {downloadingPath === contextItem?.path ? (
+                  <ActivityIndicator size="small" color="#4ade80" style={{ marginRight: 12, width: 18 }} />
+                ) : (
+                  <Ionicons name="download" size={18} color="#4ade80" style={{ marginRight: 12 }} />
+                )}
+                <Text style={styles.contextOptionText}>Downloaden</Text>
+              </TouchableOpacity>
+            )}
             <TouchableOpacity
               style={styles.contextOption}
               onPress={() => {
