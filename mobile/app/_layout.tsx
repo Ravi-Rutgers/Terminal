@@ -1,9 +1,11 @@
 import React, { useEffect, useState } from 'react';
 
+import { AppState, AppStateStatus } from 'react-native';
 import { Stack, useRouter, useSegments } from 'expo-router';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { useAuth } from '../hooks/useAuth';
 import { useStore } from '../store';
+import { useApi } from '../hooks/useApi';
 import SplashScreen from '../components/SplashScreen';
 
 const queryClient = new QueryClient();
@@ -33,6 +35,33 @@ function AuthRedirect() {
   return null;
 }
 
+function SessionRefresher() {
+  const { apiFetch } = useApi();
+  const { token, setSessions } = useStore();
+
+  useEffect(() => {
+    if (!token) return;
+
+    const handleAppStateChange = async (nextState: AppStateStatus) => {
+      if (nextState === 'active') {
+        try {
+          const data = await apiFetch('/api/sessions');
+          if (Array.isArray(data)) {
+            setSessions(data);
+          }
+        } catch {
+          // stille fout — bestaande store-state blijft
+        }
+      }
+    };
+
+    const subscription = AppState.addEventListener('change', handleAppStateChange);
+    return () => subscription.remove();
+  }, [token, apiFetch, setSessions]);
+
+  return null;
+}
+
 export default function RootLayout() {
   const showSplash = useStore((s) => s.showSplash);
   const setShowSplash = useStore((s) => s.setShowSplash);
@@ -40,6 +69,7 @@ export default function RootLayout() {
   return (
     <QueryClientProvider client={queryClient}>
       <AuthRedirect />
+      <SessionRefresher />
       <Stack
         screenOptions={{
           headerStyle: { backgroundColor: '#0a0a0a' },
