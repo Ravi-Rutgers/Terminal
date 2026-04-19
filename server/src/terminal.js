@@ -1,20 +1,59 @@
 const pty = require('node-pty');
 const crypto = require('crypto');
+const fs = require('fs');
+const path = require('path');
+
+const SESSIONS_FILE = path.join(__dirname, '../../sessions.json');
+
+function saveSessions() {
+  try {
+    const data = Array.from(sessions.values()).map((s) => ({
+      id: s.id,
+      title: s.title,
+      workdir: s.workdir,
+    }));
+    fs.writeFileSync(SESSIONS_FILE, JSON.stringify(data, null, 2));
+  } catch (e) {
+    console.warn('[terminal] Could not save sessions:', e.message);
+  }
+}
+
+function restoreSessions() {
+  if (!fs.existsSync(SESSIONS_FILE)) return;
+  let saved;
+  try {
+    saved = JSON.parse(fs.readFileSync(SESSIONS_FILE, 'utf8'));
+  } catch (e) {
+    console.warn('[terminal] Could not read sessions.json, starting fresh:', e.message);
+    return;
+  }
+  for (const s of saved) {
+    try {
+      createSession(s.workdir, s.id, s.title);
+    } catch (e) {
+      console.warn('[terminal] Could not restore session', s.id, ':', e.message);
+    }
+  }
+  console.log(`[terminal] Restored ${saved.length} session(s) from disk`);
+}
 
 const MAX_LOG_LINES = 10000;
 const sessions = new Map();
 let sessionCounter = 0;
 
-function createSession(workdir) {
-  const id = crypto.randomUUID();
+function createSession(workdir, existingId, existingTitle) {
+  const id = existingId || crypto.randomUUID();
   const shell = process.platform === 'win32' ? 'powershell.exe' : 'bash';
   const cwd = workdir || process.env.USERPROFILE || process.env.HOME;
+
+  // Verify workdir exists, fall back to home if not
+  const resolvedCwd = (cwd && fs.existsSync(cwd)) ? cwd : (process.env.USERPROFILE || process.env.HOME);
 
   const ptyProcess = pty.spawn(shell, [], {
     name: 'xterm-256color',
     cols: 80,
     rows: 24,
-    cwd,
+    cwd: resolvedCwd,
     env: process.env,
   });
 
@@ -22,8 +61,8 @@ function createSession(workdir) {
     id,
     pty: ptyProcess,
     logs: [],
-    workdir: cwd,
-    title: `Session ${++sessionCounter}`,
+    workdir: resolvedCwd,
+    title: existingTitle || `Session ${++sessionCounter}`,
     active: true,
     subscribers: new Set(),
     createdAt: new Date().toISOString(),
@@ -48,9 +87,11 @@ function createSession(workdir) {
         ws.send(JSON.stringify({ type: 'session/ended', sessionId: id, exitCode }));
       }
     }
+    saveSessions();
   });
 
   sessions.set(id, session);
+  saveSessions();
   return { id, title: session.title, workdir: session.workdir, active: true };
 }
 
@@ -78,6 +119,7 @@ function killSession(sessionId) {
   } catch (e) {
     // pty may already be dead
   }
+  saveSessions();
   return true;
 }
 
@@ -127,4 +169,5 @@ module.exports = {
   unsubscribeAll,
   listSessions,
   getSessionLogs,
+  restoreSessions,
 };
