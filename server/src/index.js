@@ -6,6 +6,7 @@ const { WebSocketServer } = require('ws');
 const { ensureCerts } = require('./certgen');
 const { authenticate, verifyToken, authMiddleware } = require('./auth');
 const terminal = require('./terminal');
+terminal.restoreSessions();
 const pixelAgents = require('./pixelAgents');
 const { getSystemInfo } = require('./sysinfo');
 const files = require('./files');
