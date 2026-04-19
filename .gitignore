@@ -45,6 +45,9 @@ Thumbs.db
 CLAUDE.md
 .claude\settings.local.json
 
-# Set up 
+# Set up
 Backend.bat
 Frontend.bat
+
+# Session persistence
+server/sessions.json
