@@ -181,8 +181,12 @@ const XTERM_HTML = `
     window.clearTerminal = () => { try { term.clear(); } catch(e) {} };
     window.scrollToBottom = () => { try { term.scrollToBottom(); isAtBottom = true; window.ReactNativeWebView.postMessage(JSON.stringify({ type: 'scrollState', atBottom: true })); } catch(e) {} };
 
+    window.ReactNativeWebView.postMessage(JSON.stringify({ type: 'ready' }));
     } catch(e) {
       document.body.innerText = 'Terminal error: ' + e.message;
+      document.body.style.color = '#f87171';
+      document.body.style.padding = '20px';
+      document.body.style.fontFamily = 'monospace';
     }
   </script>
 </body>
@@ -226,6 +230,8 @@ export default function TerminalWebView({ onInput, onResize }: Props) {
           setShowScrollBtn(!msg.atBottom);
         } else if (msg.type === 'focusInput') {
           inputRef.current?.focus();
+        } else if (msg.type === 'ready') {
+          console.log('[Terminal] WebView ready');
         }
       } catch {}
     },

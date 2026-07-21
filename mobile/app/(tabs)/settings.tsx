@@ -11,6 +11,7 @@ import {
   ActivityIndicator,
 } from 'react-native';
 import { getItem, setItem, deleteItem } from '../../utils/storage';
+import { getRecentUrls } from '../../utils/recentUrls';
 import { showAlert } from '../../utils/alert';
 import { Ionicons } from '@expo/vector-icons';
 import { useStore } from '../../store';
@@ -227,7 +228,7 @@ function SectionHeader({ icon, title, color: iconColor }: { icon: string; title:
 // --- Main screen ---
 
 export default function SettingsScreen() {
-  const { accentColor, setAccentColor, serverUrl, sessions, githubToken, setGithubToken, terminalFontSize, setTerminalFontSize, setSessions, setActiveSessionId } = useStore();
+  const { accentColor, setAccentColor, serverUrl, sessions, githubToken, setGithubToken, terminalFontSize, setTerminalFontSize, setSessions, setActiveSessionId, setShowSplash, claudeSessionKey, setClaudeSessionKey, claudeOrgId, setClaudeOrgId } = useStore();
   const { logout } = useAuth();
   const { apiFetch } = useApi();
 
@@ -239,6 +240,10 @@ export default function SettingsScreen() {
   const [scrollEnabled, setScrollEnabled] = useState(true);
   const slidingRef = useRef(false);
 
+  // Recent URLs dropdown
+  const [recentUrls, setRecentUrls] = useState<string[]>([]);
+  const [showUrlDropdown, setShowUrlDropdown] = useState(false);
+
   // Server status
   const [serverOnline, setServerOnline] = useState<boolean | null>(null);
   const [serverUptime, setServerUptime] = useState<string | null>(null);
@@ -249,6 +254,11 @@ export default function SettingsScreen() {
   const [ghLoading, setGhLoading] = useState(false);
   const [showGhInput, setShowGhInput] = useState(false);
 
+  // Claude session key
+  const [claudeKeyInput, setClaudeKeyInput] = useState(claudeSessionKey || '');
+  const [showClaudeInput, setShowClaudeInput] = useState(false);
+  const [claudeOrgInput, setClaudeOrgInput] = useState(claudeOrgId || '');
+
   // Load stored settings
   useEffect(() => {
     getItem(ACCENT_KEY).then((stored) => {
@@ -257,6 +267,7 @@ export default function SettingsScreen() {
     getItem(FONT_SIZE_KEY).then((stored) => {
       if (stored) setTerminalFontSize(parseInt(stored, 10));
     });
+    getRecentUrls().then(setRecentUrls);
   }, []);
 
   // Check server status
@@ -275,9 +286,10 @@ export default function SettingsScreen() {
         setServerUptime(null);
       }
     };
-    checkServer();
+    // Small delay so Zustand store is hydrated before first check
+    const initial = setTimeout(checkServer, 500);
     const interval = setInterval(checkServer, 30000);
-    return () => clearInterval(interval);
+    return () => { clearTimeout(initial); clearInterval(interval); };
   }, [apiFetch]);
 
   // Fetch GitHub username
@@ -400,6 +412,42 @@ export default function SettingsScreen() {
     );
   };
 
+  const saveClaudeKey = async () => {
+    const trimmed = claudeKeyInput.trim();
+    if (trimmed) {
+      await setItem('hussle_claude_session_key', trimmed);
+      setClaudeSessionKey(trimmed);
+    } else {
+      await deleteItem('hussle_claude_session_key');
+      setClaudeSessionKey(null);
+    }
+    const orgTrimmed = claudeOrgInput.trim();
+    if (orgTrimmed) {
+      await setItem('hussle_claude_org_id', orgTrimmed);
+      setClaudeOrgId(orgTrimmed);
+    }
+    setShowClaudeInput(false);
+  };
+
+  const removeClaudeKey = () => {
+    Alert.alert(
+      'Claude sleutel verwijderen',
+      'Weet je zeker dat je de Claude sessie sleutel wilt verwijderen?',
+      [
+        { text: 'Annuleren', style: 'cancel' },
+        {
+          text: 'Verwijderen',
+          style: 'destructive',
+          onPress: async () => {
+            await deleteItem('hussle_claude_session_key');
+            setClaudeSessionKey(null);
+            setClaudeKeyInput('');
+          },
+        },
+      ],
+    );
+  };
+
   // Logout
   const handleLogout = () => {
     Alert.alert(
@@ -506,10 +554,42 @@ export default function SettingsScreen() {
       <View style={styles.section}>
         <SectionHeader icon="server" title="VERBINDING" color={colors.blue} />
         <View style={styles.card}>
-          <View style={styles.infoRow}>
+          <TouchableOpacity
+            style={styles.infoRow}
+            onPress={() => recentUrls.length > 1 ? setShowUrlDropdown(!showUrlDropdown) : undefined}
+            activeOpacity={recentUrls.length > 1 ? 0.7 : 1}
+          >
             <Text style={styles.infoLabel}>Server</Text>
-            <Text style={styles.infoValue} numberOfLines={1}>{serverUrl || '—'}</Text>
-          </View>
+            <View style={{ flexDirection: 'row', alignItems: 'center', flex: 1, justifyContent: 'flex-end', gap: 6 }}>
+              <Text style={styles.infoValue} numberOfLines={1}>{serverUrl || '—'}</Text>
+              {recentUrls.length > 1 && (
+                <Ionicons
+                  name={showUrlDropdown ? 'chevron-up' : 'chevron-down'}
+                  size={14}
+                  color={colors.textMuted}
+                />
+              )}
+            </View>
+          </TouchableOpacity>
+          {showUrlDropdown && recentUrls.filter((u) => u !== serverUrl).map((url, idx, arr) => (
+            <React.Fragment key={url}>
+              <View style={styles.divider} />
+              <TouchableOpacity
+                style={styles.infoRow}
+                onPress={async () => {
+                  setShowUrlDropdown(false);
+                  await logout();
+                  router.replace({ pathname: '/login', params: { prefillUrl: url } } as any);
+                }}
+                activeOpacity={0.7}
+              >
+                <Ionicons name="server-outline" size={14} color={colors.textDim} style={{ marginRight: 8 }} />
+                <Text style={[styles.infoValue, { textAlign: 'left', color: colors.textDim, flex: 1 }]} numberOfLines={1}>
+                  {url}
+                </Text>
+              </TouchableOpacity>
+            </React.Fragment>
+          ))}
           <View style={styles.divider} />
           <View style={styles.infoRow}>
             <Text style={styles.infoLabel}>Status</Text>
@@ -608,6 +688,64 @@ export default function SettingsScreen() {
                     ) : (
                       <Text style={styles.tokenSaveText}>Opslaan</Text>
                     )}
+                  </TouchableOpacity>
+                </View>
+              </View>
+            )}
+          </>
+        )}
+      </View>
+
+      {/* === CLAUDE SESSIE === */}
+      <View style={styles.section}>
+        <SectionHeader icon="key" title="CLAUDE SESSIE" color={colors.accent} />
+        <Text style={styles.sectionDesc}>Volledige cookie string van claude.ai (Network tab → request headers → cookie:)</Text>
+        <View style={styles.infoRow}>
+          <View style={[styles.statusDot, { backgroundColor: claudeSessionKey ? colors.accent : colors.textDim }]} />
+          <Text style={[styles.infoValue, { color: claudeSessionKey ? colors.accent : colors.textDim }]}>
+            {claudeSessionKey ? 'Sleutel opgeslagen' : 'Niet ingesteld'}
+          </Text>
+        </View>
+
+        {claudeSessionKey ? (
+          <TouchableOpacity style={styles.dangerBtn} onPress={removeClaudeKey} activeOpacity={0.7}>
+            <Ionicons name="trash-outline" size={16} color={colors.red} />
+            <Text style={styles.dangerBtnText}>Sleutel verwijderen</Text>
+          </TouchableOpacity>
+        ) : (
+          <>
+            {!showClaudeInput ? (
+              <TouchableOpacity style={styles.actionBtn} onPress={() => setShowClaudeInput(true)} activeOpacity={0.7}>
+                <Ionicons name="key-outline" size={16} color={colors.accent} />
+                <Text style={styles.actionBtnText}>Sleutel toevoegen</Text>
+              </TouchableOpacity>
+            ) : (
+              <View style={styles.tokenInputCard}>
+                <TextInput
+                  style={styles.tokenInput}
+                  placeholder="sessionKey=...; cf_clearance=...; ..."
+                  placeholderTextColor={colors.textDim}
+                  value={claudeKeyInput}
+                  onChangeText={setClaudeKeyInput}
+                  autoCapitalize="none"
+                  autoCorrect={false}
+                  secureTextEntry
+                />
+                <TextInput
+                  style={[styles.tokenInput, { marginTop: 8 }]}
+                  placeholder="Org ID (ebe5d062-... uit de URL)"
+                  placeholderTextColor={colors.textDim}
+                  value={claudeOrgInput}
+                  onChangeText={setClaudeOrgInput}
+                  autoCapitalize="none"
+                  autoCorrect={false}
+                />
+                <View style={styles.tokenActions}>
+                  <TouchableOpacity style={styles.tokenCancelBtn} onPress={() => { setShowClaudeInput(false); setClaudeKeyInput(''); }} activeOpacity={0.7}>
+                    <Text style={styles.tokenCancelText}>Annuleren</Text>
+                  </TouchableOpacity>
+                  <TouchableOpacity style={styles.tokenSaveBtn} onPress={saveClaudeKey} disabled={!claudeKeyInput.trim()} activeOpacity={0.7}>
+                    <Text style={styles.tokenSaveText}>Opslaan</Text>
                   </TouchableOpacity>
                 </View>
               </View>
@@ -783,6 +921,14 @@ export default function SettingsScreen() {
             <Text style={styles.infoValue}>Expo 54</Text>
           </View>
         </View>
+        <TouchableOpacity
+          style={styles.actionBtn}
+          onPress={() => setShowSplash(true)}
+          activeOpacity={0.7}
+        >
+          <Ionicons name="play-outline" size={16} color={colors.accent} />
+          <Text style={styles.actionBtnText}>Splash testen</Text>
+        </TouchableOpacity>
         <Text style={styles.copyright}>© 2026 Magmoet. Alle rechten voorbehouden.</Text>
       </View>
     </ScrollView>

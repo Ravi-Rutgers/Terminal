@@ -8,6 +8,7 @@ import {
   Animated,
   Dimensions,
   SafeAreaView,
+  Keyboard,
 } from 'react-native';
 import { Slot, usePathname, useRouter } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
@@ -98,8 +99,16 @@ export default function DrawerLayout() {
 
   let lastSection = '';
 
+  // Swipe down to dismiss keyboard
+  const touchStartY = useRef(0);
+  const handleTouchStart = (e: any) => { touchStartY.current = e.nativeEvent.pageY; };
+  const handleTouchEnd = (e: any) => {
+    const dy = e.nativeEvent.pageY - touchStartY.current;
+    if (dy > 40) Keyboard.dismiss();
+  };
+
   return (
-    <View style={styles.container}>
+    <View style={styles.container} onTouchStart={handleTouchStart} onTouchEnd={handleTouchEnd}>
       {/* Header */}
       <SafeAreaView style={styles.headerSafe}>
         <View style={styles.header}>

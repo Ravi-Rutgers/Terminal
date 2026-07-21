@@ -165,6 +165,48 @@ function getLanguage(ext) {
   return map[ext] || 'plaintext';
 }
 
+const MIME_TYPES = {
+  '.mp4': 'video/mp4',
+  '.mov': 'video/quicktime',
+  '.avi': 'video/x-msvideo',
+  '.mkv': 'video/x-matroska',
+  '.mp3': 'audio/mpeg',
+  '.wav': 'audio/wav',
+  '.aac': 'audio/aac',
+  '.jpg': 'image/jpeg',
+  '.jpeg': 'image/jpeg',
+  '.png': 'image/png',
+  '.gif': 'image/gif',
+  '.heic': 'image/heic',
+  '.webp': 'image/webp',
+  '.pdf': 'application/pdf',
+  '.zip': 'application/zip',
+  '.tar': 'application/x-tar',
+  '.gz': 'application/gzip',
+  '.json': 'application/json',
+  '.txt': 'text/plain',
+};
+
+const MAX_DOWNLOAD_SIZE = 50 * 1024 * 1024; // 50MB
+
+function downloadFile(filePath) {
+  if (!fs.existsSync(filePath)) {
+    return { error: 'File not found', status: 404 };
+  }
+  const stat = fs.statSync(filePath);
+  if (stat.isDirectory()) {
+    return { error: 'Is a directory', status: 400 };
+  }
+  if (stat.size > MAX_DOWNLOAD_SIZE) {
+    return { error: 'File too large (>50MB)', status: 413 };
+  }
+  const ext = path.extname(filePath).toLowerCase();
+  const mimeType = MIME_TYPES[ext] || 'application/octet-stream';
+  const name = path.basename(filePath);
+  const buffer = fs.readFileSync(filePath);
+  return { buffer, mimeType, name, size: stat.size };
+}
+
 module.exports = {
   listDirectory,
   browseDirs,
@@ -174,4 +216,5 @@ module.exports = {
   createDir,
   deleteItem,
   renameItem,
+  downloadFile,
 };

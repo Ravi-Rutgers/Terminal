@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import {
   View,
   Text,
@@ -8,17 +8,34 @@ import {
   ActivityIndicator,
   KeyboardAvoidingView,
   Platform,
+  Modal,
+  FlatList,
+  Pressable,
 } from 'react-native';
 import { showAlert } from '../utils/alert';
-import { router } from 'expo-router';
+import { router, useLocalSearchParams } from 'expo-router';
 import { useAuth } from '../hooks/useAuth';
 import { colors, spacing, radius, fontSize } from '../constants/theme';
+import { getRecentUrls, addRecentUrl } from '../utils/recentUrls';
+import { Ionicons } from '@expo/vector-icons';
 
 export default function LoginScreen() {
   const { login } = useAuth();
   const [serverUrl, setServerUrl] = useState('');
   const [password, setPassword] = useState('');
   const [loading, setLoading] = useState(false);
+  const [recentUrls, setRecentUrls] = useState<string[]>([]);
+  const [showRecent, setShowRecent] = useState(false);
+
+  const { prefillUrl } = useLocalSearchParams<{ prefillUrl?: string }>();
+
+  useEffect(() => {
+    getRecentUrls().then(setRecentUrls);
+  }, []);
+
+  useEffect(() => {
+    if (prefillUrl) setServerUrl(prefillUrl);
+  }, [prefillUrl]);
 
   const handleLogin = async () => {
     if (!serverUrl.trim() || !password.trim()) {
@@ -28,9 +45,13 @@ export default function LoginScreen() {
     setLoading(true);
     try {
       await login(serverUrl.trim(), password);
+      await addRecentUrl(serverUrl.trim());
+      setRecentUrls(await getRecentUrls());
       router.replace('/(tabs)/terminal' as any);
     } catch (err: any) {
-      showAlert('Login mislukt', err.message);
+      const url = serverUrl.trim().replace(/\/+$/, '');
+      const fullUrl = /^https?:\/\//i.test(url) ? url : `http://${url}`;
+      showAlert('Login mislukt', `${err.message}\n\nURL: ${fullUrl}/auth`);
     } finally {
       setLoading(false);
     }
@@ -45,16 +66,27 @@ export default function LoginScreen() {
         <Text style={styles.title}>Hussle Terminal</Text>
         <Text style={styles.subtitle}>Verbind met je server</Text>
 
-        <TextInput
-          style={styles.input}
-          placeholder="Server URL (bijv. http://192.168.1.10:3443)"
-          placeholderTextColor={colors.textDim}
-          value={serverUrl}
-          onChangeText={setServerUrl}
-          autoCapitalize="none"
-          autoCorrect={false}
-          keyboardType="url"
-        />
+        <View style={styles.urlRow}>
+          <TextInput
+            style={[styles.input, styles.urlInput]}
+            placeholder="Server URL (bijv. http://192.168.1.10:3443)"
+            placeholderTextColor={colors.textDim}
+            value={serverUrl}
+            onChangeText={setServerUrl}
+            autoCapitalize="none"
+            autoCorrect={false}
+            keyboardType="url"
+          />
+          {recentUrls.length > 0 && (
+            <TouchableOpacity
+              style={styles.historyBtn}
+              onPress={() => setShowRecent(true)}
+              activeOpacity={0.7}
+            >
+              <Ionicons name="time-outline" size={20} color={colors.textMuted} />
+            </TouchableOpacity>
+          )}
+        </View>
 
         <TextInput
           style={styles.input}
@@ -75,6 +107,40 @@ export default function LoginScreen() {
           )}
         </TouchableOpacity>
       </View>
+
+      <Modal
+        visible={showRecent}
+        transparent
+        animationType="fade"
+        onRequestClose={() => setShowRecent(false)}
+      >
+        <Pressable style={styles.modalOverlay} onPress={() => setShowRecent(false)}>
+          <Pressable style={styles.modalBox} onPress={() => {}}>
+            <Text style={styles.modalTitle}>Recente servers</Text>
+            <FlatList
+              data={recentUrls}
+              keyExtractor={(item) => item}
+              ItemSeparatorComponent={() => <View style={styles.modalDivider} />}
+              renderItem={({ item }) => (
+                <TouchableOpacity
+                  style={styles.modalItem}
+                  onPress={() => {
+                    setServerUrl(item);
+                    setShowRecent(false);
+                  }}
+                  activeOpacity={0.7}
+                >
+                  <Ionicons name="server-outline" size={16} color={colors.textMuted} style={{ marginRight: 10 }} />
+                  <Text style={styles.modalItemText} numberOfLines={1}>{item}</Text>
+                </TouchableOpacity>
+              )}
+            />
+            <TouchableOpacity style={styles.modalCancel} onPress={() => setShowRecent(false)}>
+              <Text style={styles.modalCancelText}>Sluiten</Text>
+            </TouchableOpacity>
+          </Pressable>
+        </Pressable>
+      </Modal>
     </KeyboardAvoidingView>
   );
 }
@@ -112,6 +178,25 @@ const styles = StyleSheet.create({
     borderWidth: 1,
     borderColor: colors.borderStrong,
   },
+  urlRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginBottom: spacing.md,
+  },
+  urlInput: {
+    flex: 1,
+    marginBottom: 0,
+  },
+  historyBtn: {
+    backgroundColor: colors.elevated,
+    borderWidth: 1,
+    borderColor: colors.borderStrong,
+    borderRadius: radius.md,
+    padding: 14,
+    marginLeft: spacing.sm,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
   button: {
     backgroundColor: colors.accent,
     borderRadius: radius.md,
@@ -123,5 +208,48 @@ const styles = StyleSheet.create({
     color: colors.bg,
     fontWeight: '700',
     fontSize: fontSize.body,
+  },
+  modalOverlay: {
+    flex: 1,
+    backgroundColor: 'rgba(0,0,0,0.7)',
+    justifyContent: 'center',
+    paddingHorizontal: 24,
+  },
+  modalBox: {
+    backgroundColor: colors.elevated,
+    borderRadius: radius.md,
+    borderWidth: 1,
+    borderColor: colors.borderStrong,
+    padding: spacing.lg,
+  },
+  modalTitle: {
+    color: colors.text,
+    fontSize: fontSize.body,
+    fontWeight: '700',
+    marginBottom: spacing.md,
+  },
+  modalItem: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingVertical: spacing.md,
+  },
+  modalItemText: {
+    color: colors.textSecondary,
+    fontSize: fontSize.standard,
+    flex: 1,
+  },
+  modalDivider: {
+    height: 1,
+    backgroundColor: colors.border,
+  },
+  modalCancel: {
+    marginTop: spacing.md,
+    alignItems: 'center',
+    paddingVertical: spacing.sm,
+  },
+  modalCancelText: {
+    color: colors.textMuted,
+    fontSize: fontSize.standard,
+    fontWeight: '600',
   },
 });

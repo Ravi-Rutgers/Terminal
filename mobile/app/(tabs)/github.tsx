@@ -60,6 +60,7 @@ interface Repo {
   private: boolean;
   clone_url: string;
   owner: { login: string; avatar_url: string };
+  default_branch: string;
 }
 
 interface Issue {
@@ -429,8 +430,8 @@ export default function GitHubScreen() {
 
   // Fetch commits
   const { data: commits = [], isLoading: loadingCommits } = useQuery<Commit[]>({
-    queryKey: ['github-commits', selectedRepo?.full_name],
-    queryFn: () => ghFetch(`/repos/${selectedRepo!.full_name}/commits?per_page=30`),
+    queryKey: ['github-commits', selectedRepo?.full_name, selectedBranch],
+    queryFn: () => ghFetch(`/repos/${selectedRepo!.full_name}/commits?per_page=30${selectedBranch ? `&sha=${encodeURIComponent(selectedBranch)}` : ''}`),
     enabled: !!selectedRepo && detailTab === 'commits',
     staleTime: 30000,
   });
@@ -961,15 +962,17 @@ export default function GitHubScreen() {
                       // Directory browser
                       <View>
                         {/* Branch + Breadcrumb */}
-                        {selectedBranch && (
-                          <View style={styles.branchIndicator}>
-                            <Ionicons name="git-branch-outline" size={13} color={accentColor} style={{ marginRight: 4 }} />
-                            <Text style={[styles.breadcrumbText, { color: accentColor }]}>{selectedBranch}</Text>
+                        <View style={styles.branchIndicator}>
+                          <Ionicons name="git-branch-outline" size={13} color={accentColor} style={{ marginRight: 4 }} />
+                          <Text style={[styles.breadcrumbText, { color: accentColor }]}>
+                            {selectedBranch || selectedRepo?.default_branch || 'main'}
+                          </Text>
+                          {selectedBranch && (
                             <TouchableOpacity onPress={() => setSelectedBranch(null)} style={{ marginLeft: 8 }}>
                               <Ionicons name="close-circle" size={14} color="#555" />
                             </TouchableOpacity>
-                          </View>
-                        )}
+                          )}
+                        </View>
                         <View style={styles.breadcrumbRow}>
                           <TouchableOpacity onPress={() => setFilePath([])}>
                             <Ionicons name="home-outline" size={14} color={filePath.length > 0 ? accentColor : '#888'} />
@@ -1128,12 +1131,24 @@ export default function GitHubScreen() {
                       </View>
                     ) : (
                       // Commit list
-                      loadingCommits ? (
+                      <>
+                        <View style={styles.branchIndicator}>
+                          <Ionicons name="git-branch-outline" size={13} color={accentColor} style={{ marginRight: 4 }} />
+                          <Text style={[styles.breadcrumbText, { color: accentColor }]}>
+                            {selectedBranch || selectedRepo?.default_branch || 'main'}
+                          </Text>
+                          {selectedBranch && (
+                            <TouchableOpacity onPress={() => setSelectedBranch(null)} style={{ marginLeft: 8 }}>
+                              <Ionicons name="close-circle" size={14} color="#555" />
+                            </TouchableOpacity>
+                          )}
+                        </View>
+                        {loadingCommits ? (
                         <ActivityIndicator color={accentColor} style={{ marginTop: 20 }} />
                       ) : commits.length === 0 ? (
                         <Text style={styles.emptyTabText}>Geen commits</Text>
                       ) : (
-                        commits.map((c) => (
+                        commits.map((c, _idx) => (
                           <TouchableOpacity
                             key={c.sha}
                             style={styles.listItem}
@@ -1152,7 +1167,8 @@ export default function GitHubScreen() {
                             <Ionicons name="chevron-forward" size={14} color="#555" />
                           </TouchableOpacity>
                         ))
-                      )
+                      )}
+                      </>
                     )
                   )}
 

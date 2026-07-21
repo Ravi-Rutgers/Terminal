@@ -6,6 +6,7 @@ const { WebSocketServer } = require('ws');
 const { ensureCerts } = require('./certgen');
 const { authenticate, verifyToken, authMiddleware } = require('./auth');
 const terminal = require('./terminal');
+terminal.restoreSessions();
 const pixelAgents = require('./pixelAgents');
 const { getSystemInfo } = require('./sysinfo');
 const files = require('./files');
@@ -164,6 +165,42 @@ app.get('/api/system', async (req, res) => {
   }
 });
 
+// --- Claude usage helper page ---
+app.get('/claude-push', (req, res) => {
+  const serverOrigin = `${req.protocol}://${req.hostname}:${PORT}`;
+  const script = `fetch('/api/organizations').then(function(r){return r.json();}).then(function(o){var id=o[0].uuid;return fetch('/api/organizations/'+id+'/usage').then(function(r){return r.json();}).then(function(u){return fetch('${serverOrigin}/api/claude-usage-push',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(u)}).then(function(){console.log('Klaar! Sessie:'+u.five_hour.utilization+'% Wekelijks:'+u.seven_day.utilization+'%');});});});`;
+  res.send(`<!DOCTYPE html><html><head><meta charset="utf-8"><title>Claude Usage Push</title>
+<style>
+body{font-family:sans-serif;background:#111;color:#eee;padding:24px;max-width:560px;}
+h2{color:#4ade80;}
+p{color:#aaa;line-height:1.6;}
+textarea{width:100%;height:80px;background:#1e1e1e;color:#4ade80;border:1px solid #333;border-radius:6px;padding:10px;font-family:monospace;font-size:11px;resize:none;box-sizing:border-box;}
+button{background:#4ade80;color:#000;border:none;padding:10px 20px;border-radius:6px;cursor:pointer;font-size:14px;margin-top:8px;}
+</style></head>
+<body>
+<h2>Claude Usage → Hussle</h2>
+<p>1. Ga naar <a href="https://claude.ai" style="color:#60a5fa" target="_blank">claude.ai</a> en log in<br>
+2. Druk <strong>F12</strong> → <strong>Console</strong><br>
+3. Kopieer het script hieronder en plak het in de console → Enter</p>
+<textarea id="s" readonly onclick="this.select()">${script}</textarea>
+<br><button onclick="document.getElementById('s').select();document.execCommand('copy');this.textContent='Gekopieerd!'">Kopieer script</button>
+</body></html>`);
+});
+
+// --- Claude usage limits (push-based via bookmarklet) ---
+let cachedClaudeUsage = null;
+
+app.post('/api/claude-usage-push', (req, res) => {
+  cachedClaudeUsage = { ...req.body, updatedAt: Date.now() };
+  console.log('[claude-usage] received push:', JSON.stringify(cachedClaudeUsage).slice(0, 200));
+  res.json({ ok: true });
+});
+
+app.get('/api/claude-usage', authMiddleware, (req, res) => {
+  if (!cachedClaudeUsage) return res.status(404).json({ error: 'No data yet — run the bookmarklet on claude.ai' });
+  res.json(cachedClaudeUsage);
+});
+
 // --- Project creation ---
 app.post('/api/project', (req, res) => {
   const { name, parentDir } = req.body;
@@ -231,6 +268,206 @@ app.post('/api/files/rename', (req, res) => {
   const result = files.renameItem(oldPath, newPath);
   if (result.error) return res.status(400).json(result);
   res.json(result);
+});
+
+app.get('/api/files/download', authMiddleware, (req, res) => {
+  if (!req.query.path) return res.status(400).json({ error: 'path required' });
+  const result = files.downloadFile(req.query.path);
+  if (result.error) return res.status(result.status || 400).json({ error: result.error });
+  res.set({
+    'Content-Type': result.mimeType,
+    'Content-Disposition': `attachment; filename="${encodeURIComponent(result.name)}"`,
+    'Content-Length': result.size,
+  });
+  res.send(result.buffer);
+});
+
+// --- Git endpoints ---
+function runGit(args, cwd, res) {
+  execFile('git', args, { cwd, maxBuffer: 1024 * 1024 }, (err, stdout, stderr) => {
+    if (err) return res.status(500).json({ error: stderr || err.message });
+    res.json({ output: stdout });
+  });
+}
+
+app.get('/api/git/status', (req, res) => {
+  const dir = req.query.path;
+  if (!dir) return res.status(400).json({ error: 'path required' });
+  execFile('git', ['status', '--porcelain'], { cwd: dir, maxBuffer: 1024 * 1024 }, (err, stdout, stderr) => {
+    if (err) return res.status(500).json({ error: stderr || err.message });
+    res.json({ output: stdout });
+  });
+});
+
+app.get('/api/git/diff', (req, res) => {
+  const dir = req.query.path;
+  const file = req.query.file;
+  if (!dir) return res.status(400).json({ error: 'path required' });
+  const args = ['diff'];
+  if (file) args.push('--', file);
+  runGit(args, dir, res);
+});
+
+app.get('/api/git/diff-staged', (req, res) => {
+  const dir = req.query.path;
+  const file = req.query.file;
+  if (!dir) return res.status(400).json({ error: 'path required' });
+  const args = ['diff', '--cached'];
+  if (file) args.push('--', file);
+  runGit(args, dir, res);
+});
+
+app.get('/api/git/log', (req, res) => {
+  const dir = req.query.path;
+  const n = Math.min(parseInt(req.query.n) || 10, 100);
+  if (!dir) return res.status(400).json({ error: 'path required' });
+  runGit(['log', `--pretty=format:%H||%an||%ar||%s`, `-${n}`, '--stat'], dir, res);
+});
+
+app.get('/api/git/numstat', (req, res) => {
+  const dir = req.query.path;
+  if (!dir) return res.status(400).json({ error: 'path required' });
+  execFile('git', ['diff', '--numstat'], { cwd: dir, maxBuffer: 1024 * 1024 }, (err, stdout, stderr) => {
+    if (err) return res.status(500).json({ error: stderr || err.message });
+    // Also get staged changes
+    execFile('git', ['diff', '--cached', '--numstat'], { cwd: dir, maxBuffer: 1024 * 1024 }, (err2, stdoutStaged) => {
+      if (err2) return res.status(500).json({ error: err2.message });
+      res.json({ unstaged: stdout, staged: stdoutStaged || '' });
+    });
+  });
+});
+
+// POST /api/git/add - Stage files
+app.post('/api/git/add', (req, res) => {
+  const { path: dir, files } = req.body;
+  if (!dir || !files?.length) return res.status(400).json({ error: 'path and files required' });
+  runGit(['add', '--', ...files], dir, res);
+});
+
+// POST /api/git/unstage - Unstage files
+app.post('/api/git/unstage', (req, res) => {
+  const { path: dir, files } = req.body;
+  if (!dir || !files?.length) return res.status(400).json({ error: 'path and files required' });
+  runGit(['reset', 'HEAD', '--', ...files], dir, res);
+});
+
+// POST /api/git/add-all - Stage all
+app.post('/api/git/add-all', (req, res) => {
+  const { path: dir } = req.body;
+  if (!dir) return res.status(400).json({ error: 'path required' });
+  runGit(['add', '-A'], dir, res);
+});
+
+// POST /api/git/commit
+app.post('/api/git/commit', (req, res) => {
+  const { path: dir, message, amend } = req.body;
+  if (!dir || !message) return res.status(400).json({ error: 'path and message required' });
+  const args = ['commit', '-m', message];
+  if (amend) args.push('--amend');
+  runGit(args, dir, res);
+});
+
+// POST /api/git/fetch
+app.post('/api/git/fetch', (req, res) => {
+  const { path: dir } = req.body;
+  if (!dir) return res.status(400).json({ error: 'path required' });
+  runGit(['fetch', '--all'], dir, res);
+});
+
+// GET /api/git/branches
+app.get('/api/git/branches', (req, res) => {
+  const dir = req.query.path;
+  if (!dir) return res.status(400).json({ error: 'path required' });
+  runGit(['branch', '-a', '--format=%(refname:short)||%(objectname:short)||%(upstream:short)||%(HEAD)'], dir, res);
+});
+
+// POST /api/git/checkout
+app.post('/api/git/checkout', (req, res) => {
+  const { path: dir, branch } = req.body;
+  if (!dir || !branch) return res.status(400).json({ error: 'path and branch required' });
+  runGit(['checkout', branch], dir, res);
+});
+
+// POST /api/git/branch/create
+app.post('/api/git/branch/create', (req, res) => {
+  const { path: dir, name, base } = req.body;
+  if (!dir || !name) return res.status(400).json({ error: 'path and name required' });
+  const args = ['checkout', '-b', name];
+  if (base) args.push(base);
+  runGit(args, dir, res);
+});
+
+// DELETE /api/git/branch
+app.delete('/api/git/branch', (req, res) => {
+  const dir = req.query.path;
+  const name = req.query.name;
+  if (!dir || !name) return res.status(400).json({ error: 'path and name required' });
+  runGit(['branch', '-d', name], dir, res);
+});
+
+// GET /api/git/stash/list
+app.get('/api/git/stash/list', (req, res) => {
+  const dir = req.query.path;
+  if (!dir) return res.status(400).json({ error: 'path required' });
+  runGit(['stash', 'list'], dir, res);
+});
+
+// POST /api/git/stash
+app.post('/api/git/stash', (req, res) => {
+  const { path: dir, message } = req.body;
+  if (!dir) return res.status(400).json({ error: 'path required' });
+  const args = ['stash', 'push'];
+  if (message) args.push('-m', message);
+  runGit(args, dir, res);
+});
+
+// POST /api/git/stash/pop
+app.post('/api/git/stash/pop', (req, res) => {
+  const { path: dir, index } = req.body;
+  if (!dir) return res.status(400).json({ error: 'path required' });
+  const args = ['stash', 'pop'];
+  if (index !== undefined) args.push(`stash@{${index}}`);
+  runGit(args, dir, res);
+});
+
+// DELETE /api/git/stash
+app.delete('/api/git/stash', (req, res) => {
+  const dir = req.query.path;
+  const index = req.query.index;
+  if (!dir) return res.status(400).json({ error: 'path required' });
+  const args = ['stash', 'drop'];
+  if (index !== undefined) args.push(`stash@{${index}}`);
+  runGit(args, dir, res);
+});
+
+// GET /api/git/tags
+app.get('/api/git/tags', (req, res) => {
+  const dir = req.query.path;
+  if (!dir) return res.status(400).json({ error: 'path required' });
+  runGit(['tag', '-l', '--format=%(refname:short)||%(objectname:short)||%(creatordate:relative)||%(subject)'], dir, res);
+});
+
+// POST /api/git/tag
+app.post('/api/git/tag', (req, res) => {
+  const { path: dir, name, message } = req.body;
+  if (!dir || !name) return res.status(400).json({ error: 'path and name required' });
+  const args = message ? ['tag', '-a', name, '-m', message] : ['tag', name];
+  runGit(args, dir, res);
+});
+
+// DELETE /api/git/tag
+app.delete('/api/git/tag', (req, res) => {
+  const dir = req.query.path;
+  const name = req.query.name;
+  if (!dir || !name) return res.status(400).json({ error: 'path and name required' });
+  runGit(['tag', '-d', name], dir, res);
+});
+
+// GET /api/git/current-branch
+app.get('/api/git/current-branch', (req, res) => {
+  const dir = req.query.path;
+  if (!dir) return res.status(400).json({ error: 'path required' });
+  runGit(['rev-parse', '--abbrev-ref', 'HEAD'], dir, res);
 });
 
 // --- Start server (HTTP for local dev, HTTPS for production) ---

@@ -1,14 +1,24 @@
 import React from 'react';
-import { View, Text, StyleSheet, ScrollView, RefreshControl } from 'react-native';
+import { View, Text, StyleSheet, ScrollView, RefreshControl, TouchableOpacity, Clipboard } from 'react-native';
 import { useQuery } from '@tanstack/react-query';
 import { Ionicons } from '@expo/vector-icons';
 import { StatCard, UsageBar } from '../../components/UsageStats';
 import { useApi } from '../../hooks/useApi';
 import { useStore } from '../../store';
 
+function formatResetTime(isoOrLabel: string): string {
+  if (!isoOrLabel) return '';
+  try {
+    const d = new Date(isoOrLabel);
+    return `Reset ${d.toLocaleDateString('nl-NL', { weekday: 'short' })} ${d.toLocaleTimeString('nl-NL', { hour: '2-digit', minute: '2-digit' })}`;
+  } catch {
+    return isoOrLabel;
+  }
+}
+
 export default function UsageScreen() {
   const { apiFetch } = useApi();
-  const { sessions, setSystemInfo } = useStore();
+  const { sessions, setSystemInfo, serverUrl } = useStore();
 
   const {
     data: system,
@@ -35,6 +45,23 @@ export default function UsageScreen() {
     queryFn: () => apiFetch('/api/agents/sessions'),
     refetchInterval: 10000,
   });
+
+  const { data: claudeUsage, error: claudeError } = useQuery({
+    queryKey: ['claude-usage'],
+    queryFn: () => apiFetch('/api/claude-usage'),
+    refetchInterval: 30000,
+    retry: false,
+  });
+
+  const sessionPct: number = claudeUsage?.five_hour?.utilization ?? 0;
+  const sessionResetAt: string = claudeUsage?.five_hour?.resets_at ?? '';
+  const weeklyPct: number = claudeUsage?.seven_day?.utilization ?? 0;
+  const weeklyReset: string = claudeUsage?.seven_day?.resets_at ?? '';
+
+  function minsUntil(iso: string): number {
+    if (!iso) return 0;
+    return Math.max(0, Math.round((new Date(iso).getTime() - Date.now()) / 60000));
+  }
 
   const onRefresh = () => {
     refetchSys();
@@ -71,6 +98,42 @@ export default function UsageScreen() {
           color="#facc15"
         />
       </View>
+
+      {/* Claude usage limits */}
+      <>
+        <Text style={styles.sectionTitle}>Claude Limieten</Text>
+        <View style={styles.systemCard}>
+          {claudeError ? (
+            <>
+              <Text style={{ color: '#888', fontSize: 11, marginBottom: 6 }}>
+                Open dit adres in Chrome op je PC:
+              </Text>
+              <TouchableOpacity
+                onPress={() => Clipboard.setString(`${serverUrl}/claude-push`)}
+                style={{ backgroundColor: '#1e1e1e', borderRadius: 6, padding: 10, borderWidth: 1, borderColor: '#333' }}
+              >
+                <Text style={{ color: '#4ade80', fontSize: 12, fontFamily: 'monospace' }}>{serverUrl}/claude-push</Text>
+                <Text style={{ color: '#555', fontSize: 10, marginTop: 4 }}>Tik om te kopiëren</Text>
+              </TouchableOpacity>
+            </>
+          ) : claudeUsage ? (
+              <>
+                <UsageBar
+                  label={`Sessie (reset over ${minsUntil(sessionResetAt)}min)`}
+                  percent={sessionPct}
+                  color={sessionPct > 80 ? '#f87171' : '#60a5fa'}
+                />
+                <UsageBar
+                  label={`Wekelijks — ${formatResetTime(weeklyReset)}`}
+                  percent={weeklyPct}
+                  color={weeklyPct > 80 ? '#f87171' : '#4ade80'}
+                />
+              </>
+          ) : (
+            <Text style={{ color: '#666', fontSize: 12 }}>Laden...</Text>
+          )}
+        </View>
+      </>
 
       {/* Active sessions */}
       <Text style={styles.sectionTitle}>Sessies</Text>
