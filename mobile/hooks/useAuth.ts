@@ -56,6 +56,8 @@ export function useAuth() {
     await Promise.all([
       deleteItem(TOKEN_KEY),
       deleteItem(URL_KEY),
+      deleteItem(CLAUDE_SESSION_KEY),
+      deleteItem('hussle_claude_org_id'),
     ]);
     setToken(null);
     setClaudeSessionKey(null);

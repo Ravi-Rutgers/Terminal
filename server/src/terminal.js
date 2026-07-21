@@ -3,7 +3,7 @@ const crypto = require('crypto');
 const fs = require('fs');
 const path = require('path');
 
-const SESSIONS_FILE = path.join(__dirname, '../../sessions.json');
+const SESSIONS_FILE = path.join(__dirname, '../sessions.json');
 
 function saveSessions() {
   try {

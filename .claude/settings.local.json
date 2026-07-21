@@ -2,9 +2,8 @@
   "permissions": {
     "allow": [
       "Bash(rtk npx:*)",
-      "Git *",
-      "Edit mobile/**",
-      "Edit server/**",
+      "Edit(mobile/**)",
+      "Edit(server/**)",
       "Bash(npx:*)",
       "Read(//c/Users/ravir/.agents/skills/grill-me/**)",
       "Read(//c/Users/ravir/.agents/skills/grill-me//**)",
@@ -19,7 +18,12 @@
       "Bash(curl -s http://localhost:3000/api/sessions)",
       "Bash(pkill -f \"serve dist\")",
       "Bash(netsh advfirewall:*)",
-      "Bash(rtk git:*)"
+      "Bash(rtk git:*)",
+      "Bash(nslookup:*)",
+      "Bash(obsidian vault=Brein read path=projects/terminal/notes.md)",
+      "Bash(npm list:*)",
+      "Bash(pm2 list:*)",
+      "Bash(schtasks /query /fo LIST)"
     ]
   }
 }
